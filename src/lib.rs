@@ -1,11 +1,52 @@
 use box_intersect_ze::*;
-use cgmath::*;
-use plotpy::{Curve, Plot, StrError, Surface};
-use plotters::element::Rectangle;
-use plotters::prelude::{Color, BLUE};
 
-type BOX = boxes::Box2Df32;
+pub type BOX = boxes::Box2Df32;
 
+pub enum OcclusionStatus{
+    Occluded,
+    PartiallyVisible
+}
+
+pub struct OcclusionBuffer{
+   pub free_space: set::BBoxSet<BOX, usize>,
+   //this is silly but library wants this to store the box for inters check
+   new_box: set::BBoxSet<BOX, usize>,
+   box_idx_alloc: std::ops::RangeFrom<usize>,
+   occlusion_status: Vec<(usize,usize)>,
+}
+
+impl OcclusionBuffer{
+pub fn new()->Self{
+    OcclusionBuffer { free_space: set::BBoxSet::new(), new_box: set::BBoxSet::new(),
+    box_idx_alloc: 1..,  occlusion_status:Vec::with_capacity(16)}
+}
+
+pub fn check_a_box(&mut self, new:BOX)->OcclusionStatus
+{
+    self.new_box.clear();
+    self.occlusion_status.clear();
+    self.new_box.push(usize::MAX - 1, new);
+    box_intersect_ze::intersect_scan(self.free_space, &self.new_box, &mut self.occlusion_status);
+
+    if self.occlusion_status.is_empty(){
+        OcclusionStatus::Occluded
+    }
+    else {
+        OcclusionStatus::PartiallyVisible
+    }
+}
+
+fn add_freespace_box(&mut self, b:BOX){
+
+    self.free_space.push(self.box_idx_alloc.next().unwrap(), b)
+}
+
+/// Adds box that was last passed into check_a_box
+pub fn add_last_box(&mut self){
+    //take stuff from self.new_box
+}
+
+}
 /** Checks if new box intersects free space.
 Returns vec of indices of free space regions intersected.
  */
@@ -42,14 +83,9 @@ fn plot_intersections() {}
 #[cfg(test)]
 mod tests {
     use crate::*;
-    use box_intersect_ze::boxes::{BBox, BoxND};
+    use box_intersect_ze::boxes::BBox;
     use box_intersect_ze::*;
     use plotters::prelude::*;
-    use std::fs::File;
-    use std::io::BufRead;
-    use std::num::FpCategory::Normal;
-    use std::path::Path;
-    use stdext::function_name;
 
     const MAX_PIX: i32 = 256;
     fn project_coords(b: BOX) -> ((i32, i32), (i32, i32)) {
