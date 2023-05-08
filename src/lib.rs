@@ -1,6 +1,7 @@
-use std::f32::MIN;
-use box_intersect_ze::*;
 use box_intersect_ze::boxes::BBox;
+use box_intersect_ze::*;
+use std::f32::MIN;
+use std::ops::DerefMut;
 
 pub type BOX = boxes::Box2Df32;
 
@@ -17,7 +18,6 @@ pub struct OcclusionBuffer {
     occlusion_status: Vec<(usize, usize)>,
 }
 
-
 impl OcclusionBuffer {
     pub fn new() -> Self {
         OcclusionBuffer {
@@ -27,7 +27,6 @@ impl OcclusionBuffer {
             occlusion_status: Vec::with_capacity(16),
         }
     }
-
 
     pub fn check_a_box(&mut self, new: BOX) -> OcclusionStatus {
         self.new_box.clear();
@@ -55,8 +54,6 @@ impl OcclusionBuffer {
     fn add_freespace_box(&mut self, b: BOX) {
         self.free_space.push(self.box_idx_alloc.next().unwrap(), b)
     }
-
-
 }
 /** Checks if new box intersects free space.
 Returns vec of indices of free space regions intersected.
@@ -75,22 +72,21 @@ fn intersection_check(free_space: &set::BBoxSet<BOX, usize>, new: BOX) -> Vec<us
     result.iter().map(|e| e.0).collect()
 }
 
-fn covered_area_limits(free_space: &set::BBoxSet<BOX, usize>) -> ((f32, f32), (f32, f32)){
+fn covered_area_limits(free_space: &set::BBoxSet<BOX, usize>) -> ((f32, f32), (f32, f32)) {
+    let mut max = (f32::MIN, f32::MIN);
+    let mut min = (f32::MAX, f32::MAX);
 
-    let mut  max =(f32::MIN, f32::MIN);
-    let mut  min =(f32::MAX, f32::MAX);
-
-    for i in &free_space.boxes{
+    for i in &free_space.boxes {
         if i.0.lo(0) < min.0 {
             min.0 = i.0.lo(0)
         }
         if i.0.lo(1) < min.1 {
             min.1 = i.0.lo(1)
         }
-        if i.0.hi(0) > max.0{
+        if i.0.hi(0) > max.0 {
             max.0 = i.0.hi(0)
         }
-        if i.0.hi(1) > max.1{
+        if i.0.hi(1) > max.1 {
             max.1 = i.0.hi(1)
         }
     }
@@ -101,20 +97,254 @@ fn covered_area_limits(free_space: &set::BBoxSet<BOX, usize>) -> ((f32, f32), (f
 breaks up boxes in free space until everything is correct again.
 Returns number of new boxes added to free space set
  */
+
+
+fn identify_intersection_case(new: BOX, free: &mut BOX, new_min:(f32,f32), new_max:(f32,f32), free_min:(f32,f32),free_max:(f32,f32))-> ([bool;4], [bool;4]){
+    let new_verts_in_free = [
+            free.contains_in(0, new_min.0) && free.contains_in(1, new_min.1),
+            free.contains_in(0, new_min.0) && free.contains_in(1, new_max.1),
+            free.contains_in(0, new_max.0) && free.contains_in(1, new_max.1),
+            free.contains_in(0, new_max.0) && free.contains_in(1, new_min.1),
+        ];
+        let free_verts_in_new = [
+            new.contains_in(0, free_min.0) && new.contains_in(1, free_min.1),
+            new.contains_in(0, free_min.0) && new.contains_in(1, free_max.1),
+            new.contains_in(0, free_max.0) && new.contains_in(1, free_max.1),
+            new.contains_in(0, free_max.0) && new.contains_in(1, free_min.1),
+        ];
+    (new_verts_in_free, free_verts_in_new )
+}
+
+fn subdivide(
+    free_space: &mut set::BBoxSet<BOX, usize>,
+    free_min: (f32, f32),
+    free_max: (f32, f32),
+    new_min: (f32, f32),
+    new_max: (f32, f32),
+    free: &mut BOX,
+    new: BOX,
+    idx: usize,
+    case: (u8, u8),
+    start_idx: &mut std::ops::RangeFrom<usize>,
+)-> Vec<usize> {
+
+    let mut tokill = vec![];
+
+    let (new_verts_in_free, free_verts_in_new ) = identify_intersection_case(new, free, new_min, new_max, free_min, free_max);
+    match case{
+        (0, 4) => {
+                // new entirely contains free,  kill free completely
+                *free = BOX::new([f32::MAX, f32::MAX], [f32::MAX, f32::MAX]);
+                tokill.push(idx)
+            }
+        (4, 0) => { //free entirely contains new, break free into 3 segments
+            }
+         (1, 1) => {
+                // One vertex intersection
+                let rotation = new_verts_in_free.iter().position(|&e| e).unwrap();
+                match rotation {
+                    0 => {
+                        // Left lower corner intersection
+                        //left upper corner
+                        *free = BOX::new([free_min.0, new_max.1], [new_max.0, free_max.1]);
+
+                        //right upper corner
+                        free_space.push(
+                            start_idx.next().unwrap(),
+                            BOX::new([new_max.0, new_max.1], [free_max.0, free_max.1]),
+                        );
+                        //right lower corner
+                        free_space.push(
+                            start_idx.next().unwrap(),
+                            BOX::new([new_max.0, new_min.1], [free_max.0, new_max.1]),
+                        );
+                    }
+
+                    1 => {
+                        // Left upper corner intersection
+
+                        // left lower corner
+                        *free = BOX::new([free_min.0, free_min.1], [new_max.0, new_min.1]);
+
+                        // right upper corner
+                        free_space.push(
+                            start_idx.next().unwrap(),
+                            BOX::new([new_max.0, new_min.1], [free_max.0, free_max.1]),
+                        );
+                        // right lower corner
+                        free_space.push(
+                            start_idx.next().unwrap(),
+                            BOX::new([new_max.0, free_min.1], [free_max.0, new_min.1]),
+                        );
+                    }
+                    2 => {
+                        //Right upper corner intersection
+
+                        // Left lower corner box
+                        *free = BOX::new([free_min.0, free_min.1], [new_min.0, new_min.1]);
+
+                        //Left upper  corner box
+                        free_space.push(
+                            start_idx.next().unwrap(),
+                            BOX::new([free_min.0, new_min.1], [new_min.0, free_max.1]),
+                        );
+                        // Right lower corner box
+                        free_space.push(
+                            start_idx.next().unwrap(),
+                            BOX::new([new_min.0, free_min.1], [free_max.0, new_min.1]),
+                        )
+                    }
+                    3 => {
+                        //Right lower corner
+
+                        // Left lower corner
+                        *free = BOX::new([free_min.0, free_min.1], [new_min.0, new_max.1]);
+
+                        // Left upper corner box
+                        free_space.push(
+                            start_idx.next().unwrap(),
+                            BOX::new([free_min.0, new_max.1], [new_min.0, free_max.1]),
+                        );
+                        // Right upper corner
+                        free_space.push(
+                            start_idx.next().unwrap(),
+                            BOX::new([new_min.0, new_max.1], [free_max.0, free_max.1]),
+                        )
+                    }
+                    _ => {}
+                }
+            }
+
+        (2, 0) => {
+                // Two vertex intersection
+
+                // new overlaps from the left
+                if new_verts_in_free[0] && new_verts_in_free[1] {
+                    //left upper corner 0
+                    *free = BOX::new([new_min.0, new_max.1], [new_max.0, free_max.1]);
+                    //right upper corner 1
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([new_max.0, new_max.1], [free_max.0, new_max.1]),
+                    );
+                    // right side center 2
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([new_max.0, new_min.1], [free_max.0, new_max.1]),
+                    );
+                    // right lower corner 3
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([new_max.0, free_min.1], [free_max.0, new_min.1]),
+                    );
+                    // left lower corner 4
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([free_min.0, free_min.1], [new_max.0, new_min.1]),
+                    );
+                }
+                if new_verts_in_free[1] && new_verts_in_free[2] {
+                    // new overlaps from up
+                    // right upper corner
+                    *free = BOX::new([new_max.0, new_min.1], [free_max.0, free_max.1]);
+                    // right lower corner
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([new_max.0, free_min.1], [free_max.0, new_min.1]),
+                    );
+                    // low middle
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([new_min.0, free_min.1], [new_max.0, new_min.1]),
+                    );
+                    // left lower corner
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([free_min.0, free_min.1], [new_min.0, new_min.1]),
+                    );
+                    // left upper corner
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([free_min.0, new_min.1], [new_min.0, free_max.1]),
+                    );
+                }
+                if new_verts_in_free[2] && new_verts_in_free[3] {
+                    // new overlaps from the right
+                    // left upper corner 0
+                    *free = BOX::new([free_min.0, new_max.1], [new_min.0, free_max.1]);
+                    // right upper corner 1
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([new_min.0, new_max.1], [free_max.0, free_max.1]),
+                    );
+                    //left lower corner 2
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([new_min.0, free_min.1], [new_max.0, new_min.1]),
+                    );
+                    //left right corner 3
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([free_min.0, free_min.1], [new_min.0, new_min.1]),
+                    );
+                    // left middle 4
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([free_min.0, new_min.1], [new_min.0, new_max.1]),
+                    );
+                }
+                if new_verts_in_free[3] && new_verts_in_free[0] {
+                    // new overlaps from down
+
+                    // left lower corner 0
+                    *free = BOX::new([free_min.0, free_min.1], [new_min.0, new_max.1]);
+                    // left upper corner 1
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([free_min.0, new_max.1], [new_min.0, free_max.1]),
+                    );
+                    // upper middle 2
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([new_min.0, new_max.1], [new_max.0, free_max.1]),
+                    );
+                    // right upper corner 3
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([new_max.0, new_max.1], [free_max.0, free_max.1]),
+                    );
+                    // right lower corner 4
+                    free_space.push(
+                        start_idx.next().unwrap(),
+                        BOX::new([new_max.0, free_min.1], [free_max.0, new_max.1]),
+                    )
+                }
+            }
+
+         (0, 2) => {
+                todo!()
+            }
+        (3, _) => {
+                unreachable!()
+        }
+        (_, 3) => {
+            unreachable!()
+        }
+
+        (_, _) => { unreachable!()}
+
+
+    }
+    tokill
+}
 fn cut_space(
     free_space: &mut set::BBoxSet<BOX, usize>,
     intersected: Vec<usize>,
     new: BOX,
     start_idx: &mut std::ops::RangeFrom<usize>,
 ) {
-    // let mut collection_of_occluded_boxes = vec![];
-    // for i in intersected.boxes {
-    //     collection_of_occluded_boxes.push(free_space.boxes.get_mut(i).unwrap());
-    // }
-    // let guaranteed_free_space = covered_area_limits(&collection_of_occluded_boxes);
-    let mut tokill=vec![];
+    let mut tokill = vec![];
     for i in intersected {
-
         let (free, _fsp_index) = free_space.boxes.get_mut(i).unwrap();
 
         let free_min = (free.lo(0), free.lo(1));
@@ -123,99 +353,17 @@ fn cut_space(
         let new_min = (new.lo(0), new.lo(1));
         let new_max = (new.hi(0), new.hi(1));
 
-        let inters_vert;
+        let (new_verts_in_free, free_verts_in_new) = identify_intersection_case(new, free, new_min, new_max, free_min, free_max);
 
-        let new_verts_in = [
-            free.contains_in(0, new_min.0) && free.contains_in(1, new_min.1),//
-            free.contains_in(0, new_min.0) && free.contains_in(1, new_max.1),
-            free.contains_in(0, new_max.0) && free.contains_in(1, new_max.1),
-            free.contains_in(0, new_max.0) && free.contains_in(1, new_min.1)
-        ];
-        inters_vert = new_verts_in.iter().map(|&e| e as usize).sum();
-       // instead od deleting  boxes from free space  we mark them "empty"
-       // and keep them in case we wold need to create more boxes when subdividing free space
-        match inters_vert {
-            0 =>{
-                // kill b because b is inside filled space
-                *free = BOX::new([f32::MAX,f32::MAX], [f32::MAX, f32::MAX]);
-            }
-            1 =>{
-                /// One vertex intersection
-                let rotation = new_verts_in.iter().position(|&e| e).unwrap();
-                match rotation {
-                    0=>{
-                        // Left lower corner intersection
-                        //todo the index is yet hardcoded make it unique
-                        //left upper corner
-                        *free = BOX::new([new.lo(0), free_max.1], [new_max.0, free_max.1]);
+        let new_in_free_count = new_verts_in_free.iter().map(|&e| e as u8).sum();
+        let free_in_new_count = free_verts_in_new.iter().map(|&e| e as u8).sum();
 
-                        //right upper corner
-                        free_space.push(start_idx.next().unwrap(), BOX::new([new_max.0, new_max.1],
-                                                         [free_max.0, free_max.1]));
-                        //right lower corner
-                        free_space.push(start_idx.next().unwrap(), BOX::new([new_max.0,new_min.1],
-                                                    [free_max.0, new_max.1]));
-                        }
-                    1=>{
-                        // Left upper corner intersection
+        subdivide(free_space, free_min, free_max, new_min, new_max, free,new, i, (new_in_free_count, free_in_new_count),start_idx);
 
-                        // left lower corner
-                        *free = BOX::new([free_min.0, free_min.1], [new_max.0, new_min.1]);
-
-                        // right upper corner
-                        free_space.push(start_idx.next().unwrap(),BOX::new([new_max.0, new_min.1],
-                                                   [free_max.0, free_max.1]));
-                        // right lower corner
-                        free_space.push(start_idx.next().unwrap(), BOX::new([new_max.0,free_min.1],
-                                                    [free_max.0, new_min.1]));
-
-                    }
-                    2=>{
-                        //Right upper corner intersection
-
-                        // Left lower corner box
-                        *free = BOX::new([free_min.0, free_min.1], [new_min.0, new_min.1]);
-
-                        //Left upper  corner box
-                        free_space.push(start_idx.next().unwrap(),BOX::new([free_min.0, new_min.1], [new_min.0, free_max.1]));
-                        // Right lower corner box
-                        free_space.push(start_idx.next().unwrap(),BOX::new([new_min.0,free_min.1], [free_max.0, new_min.1]));
-
-                    }
-                    3=>{
-                        //Right lower corner
-
-                        // Left lower corner
-                        *free =  BOX::new([free_min.0,free_min.1], [new_min.0, new_max.1]);
-
-                        // Left upper corner box
-                        free_space.push(start_idx.next().unwrap(),BOX::new([free_min.0, new_max.1], [new_min.0, free_max.1]));
-                        // Right upper corner
-                        free_space.push(start_idx.next().unwrap(),BOX::new([new_min.0, new_max.1], [free_max.0, free_max.1]));
-
-
-                    }
-                    _ => {}
-                }
-            }
-            2 =>{
-                // Two vertex intersection
-
-
-            }
-            3 => {
-                unreachable!()
-            }
-            4 => {
-
-            }
-            _=>{unreachable!()}
-        }
     }
+    //amount of vert intersected free space
 
-        //amount of vert intersected free space
-
-    for i in tokill{
+    for i in tokill {
         free_space.boxes.remove(i);
     }
     // start_idx.next();
@@ -223,17 +371,13 @@ fn cut_space(
     free_space.sort();
 }
 
-
-
-
-
 #[cfg(test)]
 mod tests {
     use crate::*;
     use box_intersect_ze::boxes::BBox;
     use box_intersect_ze::*;
-    use plotters::prelude::*;
     use plotters::prelude::full_palette::GREEN_50;
+    use plotters::prelude::*;
     use plotters::style::full_palette::BLUE_50;
     use stdext::function_name;
 
@@ -248,7 +392,9 @@ mod tests {
 
         let inters = intersection_check(&free_space, new);
         assert_eq!(inters.len(), num_inters);
-        if num_inters == 0{return;}
+        if num_inters == 0 {
+            return;
+        }
         cut_space(&mut free_space, inters, new, &mut index_alloc);
         {
             let mut res = vec![];
@@ -329,8 +475,6 @@ mod tests {
         }
     }
 
-
-
     #[test]
     pub fn height_width_overlap() {
         let mut cases = vec![
@@ -385,7 +529,7 @@ mod tests {
     fn better_name(s: &str) -> String {
         s.to_string().split("::").last().unwrap().to_string()
     }
-     const MAX_PIX: i32 = 256;
+    const MAX_PIX: i32 = 256;
     fn project_coords(b: BOX) -> ((i32, i32), (i32, i32)) {
         let res = (
             ((b.lo(0) * 100.) as i32 + 100, (b.lo(1) * 100.) as i32 + 100),
