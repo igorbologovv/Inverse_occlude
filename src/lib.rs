@@ -221,103 +221,75 @@ fn subdivide(
                 // new overlaps from the left
                 if new_verts_in_free[0] && new_verts_in_free[1] {
                     //left upper corner 0
-                    *free = BOX::new([new_min.0, new_max.1], [new_max.0, free_max.1]);
-                    //right upper corner 1
+                    *free = BOX::new([free_min.0, new_max.1], [new_max.0, free_max.1]);
+                    //right
                     free_space.push(
                         start_idx.next().unwrap(),
-                        BOX::new([new_max.0, new_max.1], [free_max.0, new_max.1]),
+                        BOX::new([new_max.0, free_min.1], [free_max.0, free_max.1]),
                     );
                     // right side center 2
                     free_space.push(
                         start_idx.next().unwrap(),
-                        BOX::new([new_max.0, new_min.1], [free_max.0, new_max.1]),
-                    );
-                    // right lower corner 3
-                    free_space.push(
-                        start_idx.next().unwrap(),
-                        BOX::new([new_max.0, free_min.1], [free_max.0, new_min.1]),
-                    );
-                    // left lower corner 4
-                    free_space.push(
-                        start_idx.next().unwrap(),
                         BOX::new([free_min.0, free_min.1], [new_max.0, new_min.1]),
                     );
+
                 }
+
+                // new overlaps from up
                 if new_verts_in_free[1] && new_verts_in_free[2] {
-                    // new overlaps from up
-                    // right upper corner
-                    *free = BOX::new([new_max.0, new_min.1], [free_max.0, free_max.1]);
-                    // right lower corner
-                    free_space.push(
-                        start_idx.next().unwrap(),
-                        BOX::new([new_max.0, free_min.1], [free_max.0, new_min.1]),
-                    );
-                    // low middle
+
+
+                    // left
+                    *free = BOX::new([free_min.0, free_min.1], [new_min.0, free_max.1]);
+                    // middle
                     free_space.push(
                         start_idx.next().unwrap(),
                         BOX::new([new_min.0, free_min.1], [new_max.0, new_min.1]),
                     );
-                    // left lower corner
+                    // right
                     free_space.push(
                         start_idx.next().unwrap(),
-                        BOX::new([free_min.0, free_min.1], [new_min.0, new_min.1]),
+                        BOX::new([new_max.0, free_min.1], [free_max.0, free_max.1]),
                     );
-                    // left upper corner
-                    free_space.push(
-                        start_idx.next().unwrap(),
-                        BOX::new([free_min.0, new_min.1], [new_min.0, free_max.1]),
-                    );
+
                 }
+
+                // new overlaps from the right
                 if new_verts_in_free[2] && new_verts_in_free[3] {
-                    // new overlaps from the right
-                    // left upper corner 0
-                    *free = BOX::new([free_min.0, new_max.1], [new_min.0, free_max.1]);
+
+                    // left
+                    *free = BOX::new([free_min.0, free_min.1], [new_min.0, free_max.1]);
+
                     // right upper corner 1
                     free_space.push(
                         start_idx.next().unwrap(),
                         BOX::new([new_min.0, new_max.1], [free_max.0, free_max.1]),
                     );
-                    //left lower corner 2
+
+                    //right lower corner 2
                     free_space.push(
                         start_idx.next().unwrap(),
                         BOX::new([new_min.0, free_min.1], [new_max.0, new_min.1]),
                     );
-                    //left right corner 3
-                    free_space.push(
-                        start_idx.next().unwrap(),
-                        BOX::new([free_min.0, free_min.1], [new_min.0, new_min.1]),
-                    );
-                    // left middle 4
-                    free_space.push(
-                        start_idx.next().unwrap(),
-                        BOX::new([free_min.0, new_min.1], [new_min.0, new_max.1]),
-                    );
                 }
+                // new overlaps from down
                 if new_verts_in_free[3] && new_verts_in_free[0] {
-                    // new overlaps from down
 
-                    // left lower corner 0
-                    *free = BOX::new([free_min.0, free_min.1], [new_min.0, new_max.1]);
-                    // left upper corner 1
-                    free_space.push(
-                        start_idx.next().unwrap(),
-                        BOX::new([free_min.0, new_max.1], [new_min.0, free_max.1]),
-                    );
-                    // upper middle 2
+                    // left
+                    *free = BOX::new([free_min.0, free_min.1], [new_min.0, free_max.1]);
+
+                    // middle
                     free_space.push(
                         start_idx.next().unwrap(),
                         BOX::new([new_min.0, new_max.1], [new_max.0, free_max.1]),
                     );
-                    // right upper corner 3
+
+                    // right
                     free_space.push(
                         start_idx.next().unwrap(),
-                        BOX::new([new_max.0, new_max.1], [free_max.0, free_max.1]),
+                        BOX::new([new_max.0, free_min.1], [free_max.0, free_max.1]),
                     );
-                    // right lower corner 4
-                    free_space.push(
-                        start_idx.next().unwrap(),
-                        BOX::new([new_max.0, free_min.1], [free_max.0, new_max.1]),
-                    )
+
                 }
             }
 
