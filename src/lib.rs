@@ -132,8 +132,8 @@ fn cut_space(
             free.contains_in(0, new_max.0) && free.contains_in(1, new_min.1)
         ];
         inters_vert = new_verts_in.iter().map(|&e| e as usize).sum();
-       /// instead od deleting  boxes from free space  we mark them "empty"
-       /// and keep them in case we wold need to create more boxes when subdividing free space
+       // instead od deleting  boxes from free space  we mark them "empty"
+       // and keep them in case we wold need to create more boxes when subdividing free space
         match inters_vert {
             0 =>{
                 // kill b because b is inside filled space
@@ -147,51 +147,51 @@ fn cut_space(
                         // Left lower corner intersection
                         //todo the index is yet hardcoded make it unique
                         //left upper corner
-                        *free = BOX::new([new.lo(0), free_max.1], [free_max.0, new.hi(1)]);
+                        *free = BOX::new([new.lo(0), free_max.1], [new_max.0, free_max.1]);
 
                         //right upper corner
-                        free_space.push(start_idx.next().unwrap(), BOX::new([free_max.0, free_max.1],
-                                                         [new.hi(0), new.hi(1)]));
+                        free_space.push(start_idx.next().unwrap(), BOX::new([new_max.0, new_max.1],
+                                                         [free_max.0, free_max.1]));
                         //right lower corner
-                        free_space.push(start_idx.next().unwrap(), BOX::new([free_max.0,free_min.1],
-                                                    [new.hi(0), free_max.1]));
-
+                        free_space.push(start_idx.next().unwrap(), BOX::new([new_max.0,new_min.1],
+                                                    [free_max.0, new_max.1]));
                         }
                     1=>{
                         // Left upper corner intersection
 
                         // left lower corner
-                        *free = BOX::new([new.lo(0),new.lo(1)], [free.hi(0), free.lo(1)]);
+                        *free = BOX::new([free_min.0, free_min.1], [new_max.0, new_min.1]);
 
                         // right upper corner
-                        free_space.push(start_idx.next().unwrap(),BOX::new([free.hi(0), free.lo(1)],
-                                                   [new.hi(0), new.hi(1)]));
+                        free_space.push(start_idx.next().unwrap(),BOX::new([new_max.0, new_min.1],
+                                                   [free_max.0, free_max.1]));
                         // right lower corner
-                        free_space.push(start_idx.next().unwrap(), BOX::new([free.hi(0),new.lo(1)],
-                                                    [new.hi(0), free.lo(1)]));
+                        free_space.push(start_idx.next().unwrap(), BOX::new([new_max.0,free_min.1],
+                                                    [free_max.0, new_min.1]));
 
                     }
                     2=>{
                         //Right upper corner intersection
 
                         // Left lower corner box
-                        *free = BOX::new([new.lo(0),new.lo(1)], [free.lo(0), free.lo(1)]);
+                        *free = BOX::new([free_min.0, free_min.1], [new_min.0, new_min.1]);
 
                         //Left upper  corner box
-                        free_space.push(start_idx.next().unwrap(),BOX::new([new.lo(0), free.lo(1)], [free.lo(0), new.hi(1)]));
+                        free_space.push(start_idx.next().unwrap(),BOX::new([free_min.0, new_min.1], [new_min.0, free_max.1]));
                         // Right lower corner box
-                        free_space.push(start_idx.next().unwrap(),BOX::new([free.lo(0),new.lo(1)], [new.lo(0), free.lo(1)]));
+                        free_space.push(start_idx.next().unwrap(),BOX::new([new_min.0,free_min.1], [free_max.0, new_min.1]));
 
                     }
                     3=>{
                         //Right lower corner
+
                         // Left lower corner
-                        *free =  BOX::new([new.lo(0),new.lo(1)], [free.lo(0), free.hi(1)]);
+                        *free =  BOX::new([free_min.0,free_min.1], [new_min.0, new_max.1]);
 
                         // Left upper corner box
-                        free_space.push(start_idx.next().unwrap(),BOX::new([new.lo(0), free.hi(1)], [free.lo(0), new.hi(1)]));
+                        free_space.push(start_idx.next().unwrap(),BOX::new([free_min.0, new_max.1], [new_min.0, free_max.1]));
                         // Right upper corner
-                        free_space.push(start_idx.next().unwrap(),BOX::new([free.lo(0), free.hi(1)], [new.hi(0), new.hi(1)]));
+                        free_space.push(start_idx.next().unwrap(),BOX::new([new_min.0, new_max.1], [free_max.0, free_max.1]));
 
 
                     }
