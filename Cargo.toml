@@ -9,7 +9,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-box_intersect_ze = "0.1.0"
+box_intersect_ze = {path="../box_intersect_ze"}
 plotters = "0.3.4"
 stdext = "0.3.1"
 
