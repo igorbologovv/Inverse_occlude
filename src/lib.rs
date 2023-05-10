@@ -91,42 +91,25 @@ fn two_vertex_intersection_subdivision(
     new_verts_in_free: [bool;4]
     )->[BOX;2]{
      // Two vertex intersection
+        //     free.contains_in(0, new_min.0) && free.contains_in(1, new_min.1), left lower corner
+        //     free.contains_in(0, new_min.0) && free.contains_in(1, new_max.1), left upper corner
+        //     free.contains_in(0, new_max.0) && free.contains_in(1, new_max.1), right upper corner
+        //     free.contains_in(0, new_max.0) && free.contains_in(1, new_min.1), right lower corner
+
                 match new_verts_in_free {
                      [true,true,_,_] => {
-                    //left upper corner 0
-                    *free = BOX::new([free_min.0+EPS, new_max.1+EPS], [new_max.0-EPS, free_max.1-EPS]);
-                    //right
-                    [BOX::new([new_max.0+EPS, free_min.1+EPS], [free_max.0-EPS, free_max.1-EPS]),
-                    // right side center 2
-                    BOX::new([free_min.0+EPS, free_min.1+EPS], [new_max.0-EPS, new_min.1-EPS])]
-                }
-                // new overlaps from up
-                [_,true,true,_] => {
-                    // left
-                    *free = BOX::new([free_min.0+EPS, free_min.1+EPS], [new_min.0-EPS, free_max.1-EPS]);
-                    // middle
 
-                    [BOX::new([new_min.0+EPS, free_min.1+EPS], [new_max.0-EPS, new_min.1-EPS]),
-
-                    // right
-                    BOX::new([new_max.0+EPS, free_min.1+EPS], [free_max.0-EPS, free_max.1-EPS])]
-
-                }
-
-                // new overlaps from the right
-                [_,_,true,true] => {
-                    // left
                     *free = BOX::new([free_min.0+EPS, free_min.1+EPS], [new_min.0-EPS, free_max.1-EPS]);
                     // right upper corner 1
 
                     [BOX::new([new_min.0+EPS, new_max.1+EPS], [free_max.0-EPS, free_max.1-EPS]),
                     //right lower corner 2
-                        BOX::new([new_min.0+EPS, free_min.1+EPS], [new_max.0-EPS, new_min.1-EPS])]
-
+                        BOX::new([new_min.0+EPS, free_min.1+EPS], [free_max.0-EPS, new_min.1-EPS])]
                 }
-                // new overlaps from down
-                [true,_,_,true] => {
-                    // left
+                // new overlaps from up
+
+                [_,true,true,_] => {
+                                      // left
                     *free = BOX::new([free_min.0+EPS, free_min.1+EPS], [new_min.0-EPS, free_max.1-EPS]);
                     // middle
 
@@ -134,6 +117,32 @@ fn two_vertex_intersection_subdivision(
                     // right
                         BOX::new([new_max.0+EPS, free_min.1+EPS], [free_max.0-EPS, free_max.1-EPS])]
 
+                }
+
+                // new overlaps from the right
+                [_,_,true,true] => {
+
+
+                    *free = BOX::new([free_min.0+EPS, new_max.1+EPS], [new_max.0-EPS, free_max.1-EPS]);
+
+                    [BOX::new([new_max.0+EPS, free_min.1+EPS], [free_max.0-EPS, free_max.1-EPS]),
+
+                    BOX::new([free_min.0+EPS, free_min.1+EPS], [new_max.0-EPS, new_min.1-EPS])]
+                    ////
+                }
+                // new overlaps from down
+                [true,_,_,true] => {
+
+                    ////
+                      // left
+                    *free = BOX::new([free_min.0+EPS, free_min.1+EPS], [new_min.0-EPS, free_max.1-EPS]);
+                    // middle
+
+                    [BOX::new([new_min.0+EPS, free_min.1+EPS], [new_max.0-EPS, new_min.1-EPS]),
+
+                    // right
+                    BOX::new([new_max.0+EPS, free_min.1+EPS], [free_max.0-EPS, free_max.1-EPS])]
+                    ////
                 }
                     _ => {unreachable!()}
                 }
@@ -165,7 +174,7 @@ fn cut_space(
     let mut tokill = vec![];
 
     for i in &intersected {
-        dbg!(i);
+
         let (free, _fsp_index) = free_space.boxes.get_mut(*i).unwrap();
 
         let free_min = (free.lo(0), free.lo(1));
@@ -252,52 +261,62 @@ fn one_vertex_intersection(free: &mut BOX, free_min: (f32, f32), free_max: (f32,
                            new_min: (f32, f32), new_max: (f32, f32), rotation:usize)->BOX
 {
 // One vertex intersection
+
+
+
     match rotation {
         0 => {
-            println!("CASE 0");
-            // Left lower corner intersection
-            //left
-            *free = BOX::new([free_min.0+EPS, new_max.1+EPS], [new_max.0-EPS, free_max.1-EPS]);
 
-            //right
-            BOX::new([new_max.0+EPS, free_min.1+EPS], [free_max.0-EPS, free_max.1-EPS])
-            //Checked
-        }
-
-        1 => {
-             println!("CASE 1");
-            // Left upper corner intersection
-
-            // left
-            *free = BOX::new([free_min.0+EPS, free_min.1+EPS], [new_max.0-EPS, new_min.1-EPS]);
-
-            // right
-
-                BOX::new([new_max.0+EPS, free_min.1+EPS], [free_max.0-EPS, free_max.1-EPS])
-
-        }
-        2 => {
              println!("CASE 2");
             //Right upper corner intersection
 
             // Left
             *free = BOX::new([free_min.0+EPS, free_min.1+EPS], [new_min.0-EPS, free_max.1-EPS]);
-
+            println!("Rewrite free {:?}", free);
             // Right
 
                 BOX::new([new_min.0+EPS, free_min.1+EPS], [free_max.0-EPS, new_min.1-EPS])
 
         }
-        3 => {
-             println!("CASE 3");
+
+        1 => {
+            println!("CASE 3");
             //Right lower corner
 
             // Left lower corner
             *free = BOX::new([free_min.0+EPS, free_min.1+EPS], [new_min.0-EPS, free_max.1-EPS]);
 
             // Left upper corner box
-
+            println!("Rewrite free {:?}", free);
                 BOX::new([new_min.0+EPS, new_max.1+EPS], [free_max.0-EPS, free_max.1-EPS])
+
+        }
+        2 => {
+            //////////
+            println!("CASE 0");
+            // Left lower corner intersection
+            //left
+
+            *free = BOX::new([free_min.0+EPS, new_max.1+EPS], [new_max.0-EPS, free_max.1-EPS]);
+            println!("Rewrite free {:?}", free);
+            //right
+            BOX::new([new_max.0+EPS, free_min.1+EPS], [free_max.0-EPS, free_max.1-EPS])
+            //Checked
+            ////////////
+
+        }
+        3 => {
+             ////
+             println!("CASE 1");
+            // Left upper corner intersection
+
+            // left
+            *free = BOX::new([free_min.0+EPS, free_min.1+EPS], [new_max.0-EPS, new_min.1-EPS]);
+            println!("Rewrite free {:?}", free);
+            // right
+
+                BOX::new([new_max.0+EPS, free_min.1+EPS], [free_max.0-EPS, free_max.1-EPS])
+            /////
         }
         _ => {unreachable!()}
     }
@@ -326,8 +345,13 @@ mod tests {
         let inters = intersection_check(&free_space, new);
         assert_eq!(inters.len(), num_inters);
         if num_inters == 0 {
-            return;
+            println!("Free does not contain new, zero intersections found");
         }
+
+        //todo when free space odes not contain vertexes of a new box, check that the plane of a new
+        //box isn't covering partially free space.
+
+
         //println!("inters array is {:?}", inters);
         //println!("free space before {:?}", free_space.boxes);
         cut_space(&mut free_space, inters, new, &mut index_alloc);
@@ -338,9 +362,10 @@ mod tests {
             intersect_scan(&free_space, &free_space, &mut res);
             //assert_eq!(res.len(), 0, "free space should not have self-intersections");
             let inters = intersection_check(&free_space, new);
-            dbg!(&inters);
+
            // assert_eq!(inters.len(), 0, "free space should not intersect new after cut is done");
         }
+        println!(" Free space{:?} NEW: {:?}", free_space.boxes, new);
         plotboxes(&free_space, new, &(name + "_after.svg"));
     }
 
