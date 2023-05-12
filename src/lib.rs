@@ -1,5 +1,7 @@
+use std::ops::RangeFrom;
 use box_intersect_ze::boxes::BBox;
 use box_intersect_ze::*;
+use box_intersect_ze::set::BBoxSet;
 use crate::OcclusionStatus::Occluded;
 
 const EPS: f32 = 0.00;
@@ -17,17 +19,25 @@ pub struct OcclusionBuffer {
     new_box: set::BBoxSet<BOX, usize>,
     box_idx_alloc: std::ops::RangeFrom<usize>,
     occlusion_status: Vec<(usize, usize)>,
+    // boxes of free space that are not in use at the moment (i.e. holes in free_space array)
+    dead_boxes:Vec<usize>,
 }
+
 #[allow(dead_code)]
 impl OcclusionBuffer {
-    pub fn new() -> Self {
+    pub fn new(freespace: BOX) -> Self {
         OcclusionBuffer {
-            free_space: set::BBoxSet::new(),
+            free_space: {
+                let mut s = set::BBoxSet::with_capacity(256);
+                  s.push(0,freespace);
+                        s},
             new_box: set::BBoxSet::new(),
             box_idx_alloc: 1..,
-            occlusion_status: Vec::with_capacity(16),
+            occlusion_status: Vec::with_capacity(128),
+            dead_boxes: vec![],
         }
     }
+
     /// check if a new box intersects free space
     pub fn check_a_box(&mut self, new: BOX) -> OcclusionStatus {
         self.new_box.clear();
@@ -45,14 +55,18 @@ impl OcclusionBuffer {
             OcclusionStatus::PartiallyVisible
         }
     }
+
     /// Adds box that was last passed into check_a_box
     pub fn add_last_box(&mut self) {
         //take stuff from self.new_box
         assert!(!self.occlusion_status.is_empty());
         debug_assert!(!self.new_box.empty());
-        let newbox = self.new_box.boxes[0];
-        cut_space();
+
+        let newbox = self.new_box.boxes[0].0;
         // break up free space to accommodate new box
+        cut_space(&mut self.free_space, &mut self.dead_boxes, &self.occlusion_status, newbox,
+                  &mut self.box_idx_alloc );
+
     }
 
     /// add multiple boxes into zbuffer while cutting space for each one
@@ -65,14 +79,12 @@ impl OcclusionBuffer {
         }
     }
 
-    // fn add_freespace_box(&mut self, b: BOX) {
-    //     self.free_space.push(self.box_idx_alloc.next().unwrap(), b)
-    // }
+
 }
 /** Checks if new box intersects free space.
 Returns vec of indices of free space regions intersected.
  */
-fn intersection_check(free_space: &set::BBoxSet<BOX, usize>, new: BOX) -> Vec<usize> {
+fn intersection_check(free_space: &set::BBoxSet<BOX, usize>, new: BOX) -> Vec<(usize, usize)> {
     // create set for comparing two sets intersection
     let mut new_set = set::BBoxSet::new();
     new_set.push(usize::MAX - 1, new);
@@ -91,7 +103,8 @@ fn intersection_check(free_space: &set::BBoxSet<BOX, usize>, new: BOX) -> Vec<us
     // Collect only indices from the old set
 
     println!("List of intersections{:?}", result);
-    result.iter().map(|e| e.0).collect()
+    //result.iter().map(|e| e.0).collect()
+    result
 }
 
 /** Given vector of free space boxes and vec of indices of free space regions intersected by box new,
@@ -207,7 +220,7 @@ fn two_vertex_intersection_subdivision(
                 );
                 return None;
             }
-            ////
+
             // left
             *free = BOX::new(
                 [free_min.0 + EPS, free_min.1 + EPS],
@@ -232,29 +245,38 @@ fn two_vertex_intersection_subdivision(
             unreachable!()
         }
     }
-    // new overlaps from the left
+
 }
 
-fn identify_intersection_case(free: BOX, new_min: (f32, f32), new_max: (f32, f32)) -> [bool; 4] {
-    let new_verts_in_free = [
-        free.contains_in(0, new_min.0) && free.contains_in(1, new_min.1),
-        free.contains_in(0, new_min.0) && free.contains_in(1, new_max.1),
-        free.contains_in(0, new_max.0) && free.contains_in(1, new_max.1),
-        free.contains_in(0, new_max.0) && free.contains_in(1, new_min.1),
-    ];
-    new_verts_in_free
+/// Checks which vertices are contained in given AABB.
+/// If none are contained, array of false is returned.
+/// ordering of returned values is [left lower ,left upper, right upper ,right lower]
+fn identify_intersection_case(aabb: BOX, min_vertex: (f32, f32), max_vertex: (f32, f32)) -> [bool; 4] {
+    [
+        aabb.contains_in(0, min_vertex.0) && aabb.contains_in(1, min_vertex.1),
+        aabb.contains_in(0, min_vertex.0) && aabb.contains_in(1, max_vertex.1),
+        aabb.contains_in(0, max_vertex.0) && aabb.contains_in(1, max_vertex.1),
+        aabb.contains_in(0, max_vertex.0) && aabb.contains_in(1, min_vertex.1),
+    ]
 }
 
+///
 fn cut_space(
-    free_space: &mut set::BBoxSet<BOX, usize>,
-    intersected: Vec<usize>,
+    mut free_space: &mut set::BBoxSet<BOX, usize>,
+    mut tokill: &mut Vec<usize>,
+    intersected: &[(usize, usize)],
     new: BOX,
     start_idx: &mut std::ops::RangeFrom<usize>,
 ) {
-    let mut tokill = vec![];
+    fn maybe_push(tokill: &mut Vec<usize>,freesp: &mut BBoxSet<BOX, usize>, b: BOX, i: usize) {
+        match tokill.pop(){
+            Some(v)=>{freesp.boxes[v] = (b,i)}
+            None => {freesp.push(i, b);}
+        }
+    }
 
-    for i in &intersected {
-        let (free, _fsp_index) = free_space.boxes.get_mut(*i).unwrap();
+    for &(i,_) in intersected.iter() {
+        let (free, _fsp_index) = free_space.boxes.get_mut(i).unwrap();
 
         let free_min = (free.lo(0), free.lo(1));
         let free_max = (free.hi(0), free.hi(1));
@@ -282,13 +304,11 @@ fn cut_space(
                     [new_min.0 - EPS, free_max.1 - EPS],
                 );
                 // bottom
-                free_space.push(
-                    start_idx.next().unwrap(),
+                maybe_push(&mut tokill, &mut free_space,
                     BOX::new(
                         [new_min.0 + EPS, new_max.1 + EPS],
                         [new_max.0 - EPS, free_max.1 - EPS],
-                    ),
-                );
+                    ), start_idx.next().unwrap());
                 //top
                 free_space.push(
                     start_idx.next().unwrap(),
@@ -414,10 +434,7 @@ fn cut_space(
             }
         }
     }
-    //amount of vert intersected free space
-    for i in tokill {
-        free_space.boxes.remove(*i);
-    }
+
     // start_idx.next();
     // free_space.boxes.remove(0);
     free_space.sort();
@@ -513,8 +530,21 @@ fn one_vertex_intersection(
     }
 }
 
-fn process_occlusion(set: Vec<BOX>, zb_size:((f32, f32), (f32, f32))){
 
+
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+    use box_intersect_ze::boxes::BBox;
+
+    use plotters::prelude::*;
+    use plotters::style::full_palette::BLUE_50;
+    use stdext::function_name;
+
+    #[test]
+fn occlusion_buffer(){
+/*
     let mut free_space = set::BBoxSet::<BOX, usize>::new();
     let f_s = BOX::new([zb_size.0.0, zb_size.0.1], [zb_size.1.0, zb_size.1.1]);
     free_space.push(0, f_s);
@@ -532,20 +562,10 @@ fn process_occlusion(set: Vec<BOX>, zb_size:((f32, f32), (f32, f32))){
             buffer.add_last_box()
         }
 
-    }
+    }*/
 
 }
 
-
-
-#[cfg(test)]
-mod tests {
-    use crate::*;
-    use box_intersect_ze::boxes::BBox;
-
-    use plotters::prelude::*;
-    use plotters::style::full_palette::BLUE_50;
-    use stdext::function_name;
     #[test]
     fn box_intersect_2() {
         let mut boxes = set::BBoxSet::<boxes::Box2Df32, usize>::with_capacity(3);
@@ -571,14 +591,15 @@ mod tests {
         //assert_eq!(result, []); // fails
     }
 
-    ///
-    /// * `free`
-    /// * `new`
-    fn test_inner(free: BOX, new: BOX, name: String, num_inters: usize) {
-        let mut index_alloc = 1..;
+    fn test_inner_multiple(free: Vec<BOX>,
+                           new: BOX, name: String, num_inters: usize){
         let mut free_space = set::BBoxSet::<BOX, usize>::new();
+        let mut index_alloc = 1..;
+        for v in free{
+            free_space.push(index_alloc.next().unwrap(), v);
+        }
+        free_space.sort();
 
-        free_space.push(index_alloc.next().unwrap(), free);
         plotboxes(&free_space, new, &(name.clone() + "__before.svg"));
 
         let inters = intersection_check(&free_space, new);
@@ -586,7 +607,8 @@ mod tests {
 
         //println!("inters array is {:?}", inters);
         //println!("free space before {:?}", free_space.boxes);
-        cut_space(&mut free_space, inters, new, &mut index_alloc);
+        let mut tokill = vec![];
+        cut_space(&mut free_space, &mut tokill, &inters, new, &mut index_alloc);
         free_space.sort();
         //println!("free space after {:?}", free_space.boxes);
         {
@@ -598,6 +620,23 @@ mod tests {
         }
         println!(" Free space{:?} NEW: {:?}", free_space.boxes, new);
         plotboxes(&free_space, new, &(name + "_after.svg"));
+    }
+    ///
+    /// * `free`
+    /// * `new`
+    fn test_inner(free: BOX, new: BOX, name: String, num_inters: usize) {
+        test_inner_multiple(vec![free],new,name,num_inters);
+    }
+
+
+    #[test]
+    pub fn test_multiple_free_space(){
+        let free = vec![BOX::new([0., 0.], [0.5, 1.]),
+         BOX::new([0.5, 0.], [1., 1.])];
+
+        let new = BOX::new([0.2, 0.2], [0.7, 0.7]); //inside the empty
+       test_inner_multiple(free,new,"multiple".to_string(), 2);
+
     }
 
     #[test]
