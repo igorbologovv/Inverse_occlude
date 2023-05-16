@@ -5,9 +5,16 @@ edition = "2021"
 
 
 [lib]
+name = "aabb_occlusion_culling"
+crate-type =  ["cdylib","rlib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 box_intersect_ze = {path="../box_intersect_ze"}
 plotters = "0.3.4"
 stdext = "0.3.1"
+pyo3 =  { version = "0.18.3", features = ["eyre", "chrono"] }
 
+
+[features]
+# instead extension-module feature for pyo3 is enabled conditionally when we want to build a standalone extension module to test our plugins without "main" program
+extension-module = ["pyo3/extension-module"]

@@ -1,13 +1,12 @@
-use crate::OcclusionStatus::Occluded;
 use box_intersect_ze::boxes::BBox;
 use box_intersect_ze::set::BBoxSet;
 use box_intersect_ze::*;
-use std::ops::RangeFrom;
-
+use pyo3::*;
 const EPS: f32 = 0.00;
 const NOWHERE: f32 = f32::MAX;
 
 pub type BOX = boxes::Box2Df32;
+
 
 
 #[pyclass]
@@ -25,20 +24,33 @@ impl PyOcclusionBuffer {
         }
     }
     /// check if a new box intersects free space
-    pub fn check_a_box(&mut self, new: BOX) -> OcclusionStatus {
-
+    pub fn check_a_box(&mut self, new: ([f32;2],[f32;2])) -> bool {
+        match self.occl_buf.check_a_box(BOX::new(new.0, new.1)) {
+            OcclusionStatus::Occluded => false,
+            OcclusionStatus::PartiallyVisible => true
+        }
     }
 
     /// Adds box that was last passed into check_a_box
     pub fn add_last_box(&mut self) {
-
+       self.occl_buf.add_last_box()
     }
 
     /// add multiple boxes into zbuffer while cutting space for each one
-    pub fn add_box_set(&mut self, boxes: Vec<BOX>) {
-
+    pub fn add_box_set(&mut self, boxes: Vec<([f32;2],[f32;2])>) {
+        let boxes = vec![];
+        self.occl_buf.add_box_set(boxes);
     }
+
+
 }
+use pyo3::types::PyModule;
+#[pymodule]
+fn aabb_occlusion_culling(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+    m.add_class::<PyOcclusionBuffer>()?;
+    Ok(())
+}
+
 pub enum OcclusionStatus {
     Occluded,
     PartiallyVisible,
@@ -75,7 +87,7 @@ impl OcclusionBuffer {
         self.new_box.clear();
         self.occlusion_status.clear();
         self.new_box.push(usize::MAX - 1, new);
-        intersect_brute_force(&self.free_space, &self.new_box, &mut self.occlusion_status);
+        intersect_brute_force_flex(&self.free_space, &self.new_box, AnswerFormat::Index(&mut self.occlusion_status));
 
         if self.occlusion_status.is_empty() {
             OcclusionStatus::Occluded
@@ -99,6 +111,7 @@ impl OcclusionBuffer {
             newbox,
             &mut self.box_idx_alloc,
         );
+
     }
 
     /// add multiple boxes into zbuffer while cutting space for each one
@@ -113,32 +126,7 @@ impl OcclusionBuffer {
         }
     }
 }
-/** Checks if new box intersects free space.
-Returns vec of indices of free space regions intersected.
- */
-fn intersection_check(free_space: &set::BBoxSet<BOX, usize>, new: BOX) -> Vec<(usize, usize)> {
-    // create set for comparing two sets intersection
-    let mut new_set = set::BBoxSet::new();
-    new_set.push(usize::MAX - 1, new);
-    println!(
-        "inters check free space : {:?}, new: {:?}",
-        free_space.boxes, new
-    );
 
-    //create set which will collect the indices of the boxes from the old
-    //set of boxes, which were intersected
-    let mut result = Vec::new();
-    //find intersections and put it to the result vector
-    //TODO: once bug https://github.com/derivator/box_intersect_ze/issues/2 is fixed return to scan
-    //intersect_scan(free_space, &new_set, &mut result);
-    //intersect_brute_force(free_space, &new_set, &mut result);
-    intersect_brute_force_flex(free_space, &new_set, AnswerFormat::Index(&mut result));
-    // Collect only indices from the old set
-
-    println!("List of intersections{:?}", result);
-    //result.iter().map(|e| e.0).collect()
-    result
-}
 
 /** Given vector of free space boxes and vec of indices of free space regions intersected by box new,
 breaks up boxes in free space until everything is correct again.
@@ -314,7 +302,7 @@ fn cut_space(
     }
 
     for &(i, _) in intersected.iter() {
-        let (free, _fsp_index) = free_space.boxes.get_mut(i).unwrap();
+        let (free, _fsp_index) = free_space.boxes.get_mut(i).expect("Intersected index incorrect!");
 
         let free_min = (free.lo(0), free.lo(1));
         let free_max = (free.hi(0), free.hi(1));
@@ -372,7 +360,7 @@ fn cut_space(
                 let rotation = new_verts_in_free.iter().position(|&e| e).unwrap();
                 let b =
                     one_vertex_intersection(free, free_min, free_max, new_min, new_max, rotation);
-                println!(" BOX Ppushed to free space{:?}", b);
+
                 free_space.push(start_idx.next().unwrap(), b);
             }
 
@@ -397,7 +385,7 @@ fn cut_space(
             }
 
             (0, 2) => {
-                println!("DID WE GET HERE ??");
+
                 let space = two_vertex_intersection_subdivision(
                     free,
                     free_min,
@@ -575,29 +563,6 @@ mod tests {
     use plotters::prelude::*;
     use plotters::style::full_palette::BLUE_50;
     use stdext::function_name;
-
-    #[test]
-    fn occlusion_buffer() {
-        /*
-        let mut free_space = set::BBoxSet::<BOX, usize>::new();
-        let f_s = BOX::new([zb_size.0.0, zb_size.0.1], [zb_size.1.0, zb_size.1.1]);
-        free_space.push(0, f_s);
-
-        let mut buffer = OcclusionBuffer::new();
-
-        buffer.free_space = free_space;
-        buffer.add_box_set(set);
-
-        for b in buffer.new_box{
-
-            let status= buffer.check_a_box(b);
-            if status == Occluded {continue}
-            else{
-                buffer.add_last_box()
-            }
-
-        }*/
-    }
 
     fn test_inner_multiple(free: Vec<BOX>, new: BOX, name: String, num_inters: usize) {
         let mut free_space = set::BBoxSet::<BOX, usize>::new();
@@ -793,4 +758,31 @@ mod tests {
         assert!(res.1 .1 < MAX_PIX);
         Some(res)
     }
+
+    /** Checks if new box intersects free space.
+Returns vec of indices of free space regions intersected.
+ */
+fn intersection_check(free_space: &set::BBoxSet<BOX, usize>, new: BOX) -> Vec<(usize, usize)> {
+    // create set for comparing two sets intersection
+    let mut new_set = set::BBoxSet::new();
+    new_set.push(usize::MAX - 1, new);
+    // println!(
+    //     "inters check free space : {:?}, new: {:?}",
+    //     free_space.boxes, new
+    // );
+
+    //create set which will collect the indices of the boxes from the old
+    //set of boxes, which were intersected
+    let mut result = Vec::new();
+    //find intersections and put it to the result vector
+    //TODO: once bug https://github.com/derivator/box_intersect_ze/issues/2 is fixed return to scan
+    //intersect_scan(free_space, &new_set, &mut result);
+    //intersect_brute_force(free_space, &new_set, &mut result);
+    intersect_brute_force_flex(free_space, &new_set, AnswerFormat::Index(&mut result));
+    // Collect only indices from the old set
+
+    //println!("List of intersections{:?}", result);
+    //result.iter().map(|e| e.0).collect()
+    result
+}
 }
