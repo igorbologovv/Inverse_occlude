@@ -119,6 +119,11 @@ impl OcclusionBuffer {
         println!("Cutting space for new box: {:?}", newbox);
         // break up free space to accommodate new box
         plotboxes(&self.free_space, &self.new_box, "add_last_box_start");
+        use std::process::Command;
+        let _ = Command::new("/bin/sh")
+            .arg("-c")
+            .arg("rm -f cutspace_iteration*svg")
+            .status();
         cut_space(
             &mut self.free_space,
             &mut self.dead_boxes,
@@ -145,32 +150,16 @@ impl OcclusionBuffer {
 /// Given vector of free space boxes and vec of indices of free space regions intersected by box new,
 /// breaks up boxes in free space until everything is correct again.
 fn cut_space(
-    mut free_space: &mut BBoxSet<BOX, usize>,
-    mut to_overwrite: &mut Vec<usize>,
+    free_space: &mut BBoxSet<BOX, usize>,
+    to_overwrite: &mut Vec<usize>,
     intersected: &[(usize, usize)],
     new: &BOX,
     start_idx: &mut std::ops::RangeFrom<usize>,
 ) {
-    //panic!("Free space only");
-    fn maybe_push(tokill: &mut Vec<usize>, freesp: &mut BBoxSet<BOX, usize>, b: BOX, i: usize) {
-        // Do not insert empty boxes
-        if b.is_empty() {
-            //  println!("Empty BOX too bad {:?}", b);
-            return;
-        }
-        match tokill.pop() {
-            Some(v) => freesp.boxes[v] = (b, i),
-            None => {
-                freesp.push(i, b);
-            }
-        }
-    }
+    let new_min = (new.lo(0), new.lo(1));
+    let new_max = (new.hi(0), new.hi(1));
 
     for &(i, _) in intersected.iter() {
-        if intersected.len() == 2 {
-            println!(" IDX OF THE INTERSECTED FEEE SPACE: {:?}", intersected);
-        }
-
         let (free, _fsp_index) = free_space
             .boxes
             .get_mut(i)
@@ -179,92 +168,72 @@ fn cut_space(
         let free_min = (free.lo(0), free.lo(1));
         let free_max = (free.hi(0), free.hi(1));
 
-        let new_min = (new.lo(0), new.lo(1));
-        let new_max = (new.hi(0), new.hi(1));
-
         let new_verts_in_free = free.identify_intersection_case(new_min, new_max);
         let free_verts_in_new = new.identify_intersection_case(free_min, free_max);
 
-        println!(
-            "NEW_IN_FREE: {:?} FREE_IN_NEW: {:?}",
-            new_verts_in_free, free_verts_in_new
-        );
-
         let new_in_free_count = new_verts_in_free.iter().map(|&e| e as u8).sum();
         let free_in_new_count = free_verts_in_new.iter().map(|&e| e as u8).sum();
-
         // Delete the (now invalid) free box by moving it into "Nowhere"
         *free = BOX::new([NOWHERE, NOWHERE], [NOWHERE, NOWHERE]);
         // Add it to freelist for memory reuse
         to_overwrite.push(i);
-        println!(
-            "NEW IN: {:?}, FREE IN: {:?}",
-            new_in_free_count, free_in_new_count
-        );
+
+        let mut maybe_push2 = |b: BOX| {
+            // Do not insert empty boxes
+            if b.is_empty() {
+                return;
+            }
+            let i = start_idx.next().unwrap();
+            match to_overwrite.pop() {
+                Some(v) => free_space.boxes[v] = (b, i),
+                None => {
+                    free_space.push(i, b);
+                }
+            };
+        };
+
         match (new_in_free_count, free_in_new_count) {
             // new box completely covers free, free should be removed (which it already is)
             (0, 4) => {}
             //free entirely contains new, break free into 4 segments
             (4, 0) => {
                 // left
-                maybe_push(
-                    &mut to_overwrite,
-                    &mut free_space,
-                    BOX::new(
-                        [free_min.0 + EPS, free_min.1 + EPS],
-                        [new_min.0 - EPS, free_max.1 - EPS],
-                    ),
-                    start_idx.next().unwrap(),
-                );
+                maybe_push2(BOX::new(
+                    [free_min.0 + EPS, free_min.1 + EPS],
+                    [new_min.0 - EPS, free_max.1 - EPS],
+                ));
                 // bottom
-                maybe_push(
-                    &mut to_overwrite,
-                    &mut free_space,
-                    BOX::new(
-                        [new_min.0 + EPS, new_max.1 + EPS],
-                        [new_max.0 - EPS, free_max.1 - EPS],
-                    ),
-                    start_idx.next().unwrap(),
-                );
+                maybe_push2(BOX::new(
+                    [new_min.0 + EPS, new_max.1 + EPS],
+                    [new_max.0 - EPS, free_max.1 - EPS],
+                ));
                 //top
-                maybe_push(
-                    &mut to_overwrite,
-                    &mut free_space,
-                    BOX::new(
-                        [new_min.0 + EPS, free_min.1 + EPS],
-                        [new_max.0 - EPS, new_min.1 - EPS],
-                    ),
-                    start_idx.next().unwrap(),
-                );
+                maybe_push2(BOX::new(
+                    [new_min.0 + EPS, free_min.1 + EPS],
+                    [new_max.0 - EPS, new_min.1 - EPS],
+                ));
                 // right
-                maybe_push(
-                    &mut to_overwrite,
-                    &mut free_space,
-                    BOX::new(
-                        [new_max.0 + EPS, free_min.1 + EPS],
-                        [free_max.0 - EPS, free_max.1 - EPS],
-                    ),
-                    start_idx.next().unwrap(),
-                );
+                maybe_push2(BOX::new(
+                    [new_max.0 + EPS, free_min.1 + EPS],
+                    [free_max.0 - EPS, free_max.1 - EPS],
+                ));
             }
             // One corner overlap
-            (1, 1) => {
+            (1, 1) | (1, 0) => {
                 let rotation = new_verts_in_free.iter().position(|&e| e).unwrap();
                 let (b1, b2) =
                     one_vertex_intersection(free_min, free_max, new_min, new_max, rotation);
-                maybe_push(
-                    &mut to_overwrite,
-                    &mut free_space,
-                    b1,
-                    start_idx.next().unwrap(),
-                );
-                maybe_push(
-                    &mut to_overwrite,
-                    &mut free_space,
-                    b2,
-                    start_idx.next().unwrap(),
-                );
+                maybe_push2(b1);
+                maybe_push2(b2);
             }
+            (0, 1) => {
+                let rotation = (free_verts_in_new.iter().position(|&e| e).unwrap() + 2) % 4;
+                let (b1, b2) =
+                    one_vertex_intersection(free_min, free_max, new_min, new_max, rotation);
+                maybe_push2(b1);
+                maybe_push2(b2);
+            }
+
             // One side overlap, new is smaller than free
             (2, 0) => {
                 let (b, space) = two_vertex_intersection_subdivision(
@@ -275,23 +244,13 @@ fn cut_space(
                     new_verts_in_free,
                     false,
                 );
-                maybe_push(
-                    &mut to_overwrite,
-                    &mut free_space,
-                    b,
-                    start_idx.next().unwrap(),
-                );
+                maybe_push2(b);
 
                 match space {
                     None => {}
                     Some(boxes) => {
                         for b in boxes {
-                            maybe_push(
-                                &mut to_overwrite,
-                                &mut free_space,
-                                b,
-                                start_idx.next().unwrap(),
-                            );
+                            maybe_push2(b);
                         }
                     }
                 }
@@ -306,22 +265,12 @@ fn cut_space(
                     free_verts_in_new,
                     true,
                 );
-                maybe_push(
-                    &mut to_overwrite,
-                    &mut free_space,
-                    b,
-                    start_idx.next().unwrap(),
-                );
+                maybe_push2(b);
                 match space {
                     None => {}
                     Some(boxes) => {
                         for b in boxes {
-                            maybe_push(
-                                &mut to_overwrite,
-                                &mut free_space,
-                                b,
-                                start_idx.next().unwrap(),
-                            );
+                            maybe_push2(b);
                         }
                     }
                 }
@@ -329,79 +278,63 @@ fn cut_space(
 
             // intersection occurs, but no vertices lie inside other box ("cross" shape overlap or its degenerate edge cases)
             (0, 0) => {
-                let (vertical_x, vertical_y) = (
-                    new_min.0 >= free_min.0 && new_max.0 <= free_max.0,
-                    new_min.1 <= free_min.1 && new_max.1 >= free_max.1,
+                debug_assert!(
+                    !BOX::new([free_min.0, free_min.1], [free_max.0, free_max.1])
+                        .contains_point([new_min.0, new_min.1])
+                );
+                debug_assert!(
+                    !BOX::new([free_min.0, free_min.1], [free_max.0, free_max.1])
+                        .contains_point([new_max.0, new_max.1])
                 );
 
-                let (horizontal_x, horizontal_y) = (
-                    new_min.0 <= free_min.0 && new_max.0 >= free_max.0,
-                    new_min.1 >= free_min.1 && new_max.1 <= free_max.1,
-                );
+                let has_left = new_min.0 > free_min.0;
+                let has_right = new_max.0 < free_max.0;
+                let has_top = new_max.1 < free_max.1;
+                let has_bot = new_min.1 > free_min.1;
 
-                match (vertical_x & vertical_y, horizontal_x & horizontal_y) {
-                    (true, false) => {
-                        let fss = BOX::new(
-                            [free_min.0 + EPS, free_min.1 + EPS],
-                            [new_min.0 - EPS, free_max.1 - EPS],
-                        );
-                        maybe_push(
-                            &mut to_overwrite,
-                            &mut free_space,
-                            fss,
-                            start_idx.next().unwrap(),
-                        );
-                        // bottom
-                        maybe_push(
-                            &mut to_overwrite,
-                            &mut free_space,
-                            BOX::new(
-                                [new_max.0 + EPS, free_min.1 + EPS],
-                                [free_max.0 - EPS, free_max.1 - EPS],
-                            ),
-                            start_idx.next().unwrap(),
-                        );
-                    }
-                    (false, true) => {
-                        let fss = BOX::new(
-                            [free_min.0 + EPS, new_max.1 + EPS],
-                            [free_max.0 - EPS, free_max.1 - EPS],
-                        );
+                if (has_bot || has_top) == (has_left || has_right) {
+                    dbg!(new_min.0, new_min.1);
+                    dbg!(new_max.0, new_max.1);
+                    dbg!(free_min.0, free_min.1);
+                    dbg!(free_max.0, free_max.1);
+                    let mut new_space = set::BBoxSet::<BOX, usize>::new();
+                    new_space.push(i, *new);
+                    plotboxes(&free_space, &new_space, "fail_test_draw");
 
-                        maybe_push(
-                            &mut to_overwrite,
-                            free_space,
-                            fss,
-                            start_idx.next().unwrap(),
-                        );
-                        //if free.is_empty() {}
-                        // right
-                        maybe_push(
-                            &mut to_overwrite,
-                            &mut free_space,
-                            BOX::new(
-                                [free_min.0 + EPS, free_min.1 + EPS],
-                                [free_max.0 - EPS, new_min.1 - EPS],
-                            ),
-                            start_idx.next().unwrap(),
-                        );
-                    }
-                    (false, false) => {
-                        dbg!(new_min.0, new_min.1);
-                        dbg!(new_max.0, new_max.1);
-                        dbg!(free_min.0, free_min.1);
-                        dbg!(free_max.0, free_max.1);
-                        unreachable!("You don't have to visit a doctor")
-                    }
-                    (true, true) => {
-                        unreachable!("You might want to visit a doctor")
-                    }
+                    unreachable!("You have to visit a doctor");
+                }
+
+                if has_bot {
+                    maybe_push2(BOX::new(
+                        [free_min.0 + EPS, free_min.1 + EPS],
+                        [free_max.0 - EPS, new_min.1 - EPS],
+                    ));
+                }
+                if has_top {
+                    maybe_push2(BOX::new(
+                        [free_min.0 + EPS, new_max.1 + EPS],
+                        [free_max.0 - EPS, free_max.1 - EPS],
+                    ));
+                }
+                if has_left {
+                    maybe_push2(BOX::new(
+                        [free_min.0 + EPS, free_min.1 + EPS],
+                        [new_min.0 - EPS, free_max.1 - EPS],
+                    ));
+                }
+                if has_right {
+                    maybe_push2(BOX::new(
+                        [new_max.0 + EPS, free_min.1 + EPS],
+                        [free_max.0 - EPS, free_max.1 - EPS],
+                    ));
                 }
             }
             // all other cases should never happen
             (a, b) => {
-                println!("U FOUND ME SON OF A BITCH = {:?}", intersected.len());
                 println!("{a} {b} HAPPENED ");
+                dbg!(new);
+                dbg!(free_min, free_max);
+
                 let mut new_space = set::BBoxSet::<BOX, usize>::new();
                 new_space.push(i, *new);
                 plotboxes(&free_space, &new_space, "fail_test_draw");
@@ -545,6 +478,13 @@ mod tests {
     }
 
     #[test]
+    pub fn similar_max_coord() {
+        let new = BOX::new([0.0, 0.5], [1., 1.0]); // base
+        let free = BOX::new([0., 0.], [1., 0.9998]); // base //inside the empty
+        test_inner(free, new, "test_corner_overlap", function_name!(), 1);
+    }
+
+    #[test]
     pub fn test_corner_overlap() {
         let cases = vec![
             BOX::new([0.7, -0.3], [1.3, 0.3]),
@@ -671,5 +611,17 @@ mod tests {
         let free = vec![BOX::new([0., 0.], [1., 1.])]; // base
 
         test_inner_multiple(&free, &cases, "edge_case", function_name!(), 6);
+    }
+    #[test]
+    pub fn special_one_corner_overlaps_a() {
+        let new = BOX::new([0.0059359292, 0.018032173], [0.04272885, 0.05482509]);
+        let free = BOX::new([0.01197005, -4.8515215], [0.04272885, 0.054460805]);
+        test_inner(free, new, "edge_case", function_name!(), 1);
+    }
+    #[test]
+    pub fn special_one_corner_overlaps_b() {
+        let free = BOX::new([0.0059359292, 0.018032173], [0.04272885, 0.05482509]);
+        let new = BOX::new([0.01197005, -4.8515215], [0.04272885, 0.054460805]);
+        test_inner(free, new, "edge_case", function_name!(), 1);
     }
 }

@@ -50,10 +50,16 @@ fn project_coords(b: BOX) -> Option<((i32, i32), (i32, i32))> {
     if b.lo(0) == NOWHERE {
         return None;
     }
-
+    let bias = MAX_PIX / 2;
     let res = (
-        ((b.lo(0) * 100.) as i32 + 100, (b.lo(1) * 100.) as i32 + 100),
-        ((b.hi(0) * 100.) as i32 + 100, (b.hi(1) * 100.) as i32 + 100),
+        (
+            (b.lo(0) * 100.) as i32 + bias,
+            (-b.hi(1) * 100.) as i32 + bias,
+        ),
+        (
+            (b.hi(0) * 100.) as i32 + bias,
+            (-b.lo(1) * 100.) as i32 + bias,
+        ),
     );
 
     Some(res)
