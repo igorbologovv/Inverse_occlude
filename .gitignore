@@ -1,2 +1,5 @@
 /target
 Cargo.lock
+*.svg
+.idea/
+/out/
